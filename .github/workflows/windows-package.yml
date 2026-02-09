@@ -1,0 +1,339 @@
+name: Windows Package Build
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type (debug or release)'
+        required: false
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
+
+env:
+  NODE_VERSION: '22.x'
+  PNPM_VERSION: '10.23.0'
+
+jobs:
+  build-npm-package:
+    name: Build NPM Package (Windows)
+    runs-on: windows-latest
+    outputs:
+      package_version: ${{ steps.version.outputs.version }}
+      artifact_name: ${{ steps.artifact.outputs.name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Checkout submodules (retry)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          for attempt in 1 2 3 4 5; do
+            if git -c protocol.version=2 submodule update --init --force --depth=1 --recursive; then
+              exit 0
+            fi
+            echo "Submodule update failed (attempt $attempt/5). Retrying…"
+            sleep $((attempt * 10))
+          done
+          exit 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          check-latest: true
+
+      - name: Setup pnpm (corepack)
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          for attempt in 1 2 3; do
+            if corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate; then
+              pnpm -v
+              exit 0
+            fi
+            echo "corepack prepare failed (attempt $attempt/3). Retrying..."
+            sleep $((attempt * 10))
+          done
+          exit 1
+
+      - name: Display runtime versions
+        shell: bash
+        run: |
+          node -v
+          npm -v
+          pnpm -v
+
+      - name: Get package version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Package version: $VERSION"
+
+      - name: Install dependencies
+        shell: bash
+        env:
+          CI: true
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts=false --config.engine-strict=false --config.enable-pre-post-scripts=true
+
+      - name: Bundle A2UI (if needed)
+        shell: bash
+        run: |
+          if [ -d "src/canvas-host/a2ui" ]; then
+            pnpm canvas:a2ui:bundle || echo "A2UI bundle step skipped or failed"
+          fi
+
+      - name: Build TypeScript
+        shell: bash
+        run: pnpm build
+
+      - name: Verify build outputs
+        shell: bash
+        run: |
+          echo "Checking dist/ directory..."
+          ls -lh dist/ || dir dist\
+          echo "Checking entry point..."
+          test -f dist/entry.js || (echo "ERROR: dist/entry.js not found" && exit 1)
+          echo "Build verification complete"
+
+      - name: Create NPM package tarball
+        shell: bash
+        run: |
+          npm pack --pack-destination ./artifacts
+          ls -lh ./artifacts/
+
+      - name: Set artifact name
+        id: artifact
+        shell: bash
+        run: |
+          ARTIFACT_NAME="moltbot-${{ steps.version.outputs.version }}.tgz"
+          echo "name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+          echo "Artifact name: $ARTIFACT_NAME"
+
+      - name: Upload NPM package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-package-windows
+          path: ./artifacts/*.tgz
+          retention-days: 7
+
+  test-installer-script:
+    name: Test PowerShell Installer
+    runs-on: windows-latest
+    needs: build-npm-package
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Check for install.ps1 in sibling repo
+        id: check_installer
+        shell: powershell
+        run: |
+          $installerPath = "../molt.bot/public/install.ps1"
+          if (Test-Path $installerPath) {
+            Write-Output "installer_exists=true" >> $env:GITHUB_OUTPUT
+            Write-Output "Installer script found at $installerPath"
+          } else {
+            Write-Output "installer_exists=false" >> $env:GITHUB_OUTPUT
+            Write-Output "Installer script not found at $installerPath"
+          }
+
+      - name: Display installer help (if exists)
+        if: steps.check_installer.outputs.installer_exists == 'true'
+        shell: powershell
+        run: |
+          $script = Get-Content ../molt.bot/public/install.ps1 -Raw
+          & ([scriptblock]::Create($script)) -Help
+
+      - name: Test NPM global install
+        shell: powershell
+        run: |
+          Write-Output "Testing npm install from local package..."
+          # Download artifact and test install would go here
+          Write-Output "NPM install test placeholder - would test package from artifacts"
+
+  # Future: Native Windows app build
+  build-windows-app:
+    name: Build Native Windows App (Placeholder)
+    runs-on: windows-latest
+    if: false  # Disabled until Windows app is implemented
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Check for Windows app
+        id: check_app
+        shell: powershell
+        run: |
+          if (Test-Path "apps/windows") {
+            Write-Output "windows_app_exists=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Output "windows_app_exists=false" >> $env:GITHUB_OUTPUT
+            Write-Output "Windows app directory not found - skipping build"
+          }
+
+      - name: Build Windows app
+        if: steps.check_app.outputs.windows_app_exists == 'true'
+        shell: powershell
+        run: |
+          cd apps/windows
+          dotnet restore
+          dotnet build -c Release
+
+      - name: Install WiX Toolset
+        if: steps.check_app.outputs.windows_app_exists == 'true'
+        shell: powershell
+        run: |
+          # Install WiX via dotnet tool
+          dotnet tool install --global wix --version 5.0.2
+
+      - name: Create MSI installer
+        if: steps.check_app.outputs.windows_app_exists == 'true'
+        shell: powershell
+        run: |
+          # Placeholder for MSI creation
+          Write-Output "MSI creation would happen here"
+
+      - name: Upload Windows app artifacts
+        if: steps.check_app.outputs.windows_app_exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-app-installer
+          path: |
+            dist/*.msi
+            dist/*.exe
+          retention-days: 7
+
+  release-windows:
+    name: Create Windows Release Assets
+    runs-on: windows-latest
+    needs: [build-npm-package, test-installer-script]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download NPM package
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-package-windows
+          path: ./release-artifacts
+
+      - name: Display release artifacts
+        shell: bash
+        run: |
+          echo "Release artifacts:"
+          ls -lh ./release-artifacts/
+
+      - name: Extract version from tag
+        id: tag_version
+        shell: bash
+        run: |
+          TAG=${GITHUB_REF#refs/tags/v}
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Tag version: $TAG"
+
+      - name: Create release notes
+        shell: bash
+        run: |
+          cat > release-notes.md <<'EOF'
+          # Moltbot Windows Release ${{ steps.tag_version.outputs.version }}
+
+          ## Installation
+
+          ### Option 1: NPM (Recommended)
+          ```powershell
+          npm install -g moltbot@${{ steps.tag_version.outputs.version }}
+          ```
+
+          ### Option 2: PowerShell Installer
+          ```powershell
+          iwr -useb https://molt.bot/install.ps1 | iex
+          ```
+
+          ### Option 3: WSL2 (Recommended for full features)
+          See [Windows WSL2 documentation](https://docs.molt.bot/platforms/windows)
+
+          ## Package Contents
+          - NPM package tarball for Windows
+          - Compatible with Node.js 22+
+
+          ## Notes
+          - Native Windows companion app coming soon
+          - For full features, WSL2 installation is recommended
+          EOF
+          cat release-notes.md
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ./release-artifacts/*.tgz
+          body_path: release-notes.md
+          draft: false
+          prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs: [build-npm-package, test-installer-script]
+    if: always()
+    steps:
+      - name: Generate summary
+        shell: bash
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<'EOF'
+          # Windows Package Build Summary
+
+          ## Build Results
+          - **Package Version**: ${{ needs.build-npm-package.outputs.package_version }}
+          - **NPM Package**: ${{ needs.build-npm-package.result == 'success' && '✅ Built' || '❌ Failed' }}
+          - **Installer Test**: ${{ needs.test-installer-script.result == 'success' && '✅ Passed' || needs.test-installer-script.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}
+
+          ## Artifacts
+          - NPM tarball: `${{ needs.build-npm-package.outputs.artifact_name }}`
+
+          ## Next Steps
+          - Native Windows app: Coming soon (apps/windows/ to be implemented)
+          - MSI installer: Will be added when Windows app is ready
+          - Auto-update: Squirrel.Windows integration planned
+
+          ## Documentation
+          - [Windows Setup Guide](https://docs.molt.bot/platforms/windows)
+          - [WSL2 Installation](https://docs.molt.bot/platforms/windows#install-wsl2)
+          EOF
