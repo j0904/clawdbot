@@ -6,7 +6,7 @@ on:
       - main
       - dev
     tags:
-      - 'v*'
+      - "v*"
   pull_request:
     branches:
       - main
@@ -14,17 +14,17 @@ on:
   workflow_dispatch:
     inputs:
       build_type:
-        description: 'Build type (debug or release)'
+        description: "Build type (debug or release)"
         required: false
-        default: 'debug'
+        default: "debug"
         type: choice
         options:
           - debug
           - release
 
 env:
-  NODE_VERSION: '22.x'
-  PNPM_VERSION: '10.23.0'
+  NODE_VERSION: "22.x"
+  PNPM_VERSION: "10.23.0"
 
 jobs:
   build-npm-package:
@@ -117,18 +117,56 @@ jobs:
           test -f dist/entry.js || (echo "ERROR: dist/entry.js not found" && exit 1)
           echo "Build verification complete"
 
-      - name: Create NPM package tarball
+      - name: Prepare production dependencies
+        shell: bash
+        run: |
+          echo "Installing production dependencies only..."
+          # Remove dev dependencies and reinstall only production
+          rm -rf node_modules
+          pnpm install --prod --frozen-lockfile --ignore-scripts=false
+          echo "Production dependencies installed"
+
+      - name: Create bundled tarball with node_modules
         shell: bash
         run: |
           mkdir -p ./artifacts
-          npm pack --pack-destination ./artifacts
+          VERSION=$(node -p "require('./package.json').version")
+          TARBALL_NAME="openclaw-${VERSION}.tgz"
+
+          echo "Creating bundled tarball: $TARBALL_NAME"
+
+          # Create a temporary package directory
+          mkdir -p ./package-temp
+
+          # Copy all necessary files
+          cp -r dist ./package-temp/
+          cp -r node_modules ./package-temp/
+          cp -r assets ./package-temp/ 2>/dev/null || true
+          cp -r extensions ./package-temp/
+          cp -r skills ./package-temp/
+          cp -r docs ./package-temp/ 2>/dev/null || true
+          cp package.json ./package-temp/
+          cp openclaw.mjs ./package-temp/
+          cp README.md ./package-temp/ 2>/dev/null || true
+          cp LICENSE ./package-temp/ 2>/dev/null || true
+          cp CHANGELOG.md ./package-temp/ 2>/dev/null || true
+
+          # Create tarball with node_modules included
+          cd package-temp
+          tar -czf "../artifacts/${TARBALL_NAME}" .
+          cd ..
+
+          # Cleanup
+          rm -rf ./package-temp
+
+          echo "Tarball created successfully"
           ls -lh ./artifacts/
 
       - name: Set artifact name
         id: artifact
         shell: bash
         run: |
-          ARTIFACT_NAME="moltbot-${{ steps.version.outputs.version }}.tgz"
+          ARTIFACT_NAME="openclaw-${{ steps.version.outputs.version }}.tgz"
           echo "name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
           echo "Artifact name: $ARTIFACT_NAME"
 
@@ -184,7 +222,7 @@ jobs:
   build-windows-app:
     name: Build Native Windows App (Placeholder)
     runs-on: windows-latest
-    if: false  # Disabled until Windows app is implemented
+    if: false # Disabled until Windows app is implemented
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -192,7 +230,7 @@ jobs:
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: "8.0.x"
 
       - name: Check for Windows app
         id: check_app
@@ -281,30 +319,38 @@ jobs:
 
           ## 🚀 Installation
 
-          ### Direct Download
-          Download the `.tgz` file below and install with:
+          ### PowerShell Installer (Recommended)
           ```powershell
-          npm install -g clawdbot-${{ needs.build-npm-package.outputs.package_version }}.tgz
+          # Download installer script
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/j0904/clawdbot/main/scripts/Install-OpenClaw.ps1" -OutFile "Install-OpenClaw.ps1"
+
+          # Run installer (will download and install OpenClaw)
+          .\Install-OpenClaw.ps1
+          ```
+
+          ### Manual Installation
+          Download the `.tgz` file below and extract:
+          ```powershell
+          # Download
+          Invoke-WebRequest -Uri "https://github.com/j0904/clawdbot/releases/download/latest/openclaw-${{ needs.build-npm-package.outputs.package_version }}.tgz" -OutFile openclaw.tgz
+
+          # Extract to your desired location
+          tar -xzf openclaw.tgz -C C:\UserStorage\$env:USERNAME\OpenClaw\bin
+
+          # No npm install needed - dependencies are bundled!
           ```
 
           ### From NPM Registry (if published)
           ```powershell
-          npm install -g @clawdbot/clawdbot
-          ```
-
-          ### PowerShell Quick Install
-          ```powershell
-          # Download and extract
-          Invoke-WebRequest -Uri "https://github.com/j0904/clawdbot/releases/download/latest/moltbot-${{ needs.build-npm-package.outputs.package_version }}.tgz" -OutFile clawdbot.tgz
-          tar -xzf clawdbot.tgz
-          cd package
-          npm install -g .
+          npm install -g openclaw@latest
           ```
 
           ## 📦 Package Contents
-          - NPM package tarball for Windows
+          - Fully bundled tarball with **all dependencies included**
+          - **No npm install required** - ready to run after extraction
           - Compatible with Node.js 22+
           - Built and tested on Windows
+          - Requires only Node.js runtime (no git, npm, or build tools needed)
 
           ## 📖 Documentation
           - [GitHub Repository](https://github.com/j0904/clawdbot)

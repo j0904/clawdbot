@@ -120,13 +120,30 @@ try {
 
     Write-Host "Extraction complete" -ForegroundColor Green
 
-    # Install npm dependencies
-    if (Test-Path "$openclawBinPath\package.json") {
-        Write-Host "Installing dependencies (this may take several minutes)..." -ForegroundColor Yellow
-        Push-Location $openclawBinPath
-        npm install --production 2>&1 | Out-Null
-        Pop-Location
-        Write-Host "Dependencies installed" -ForegroundColor Green
+    # Verify node_modules exists (should be bundled in tarball)
+    if (-not (Test-Path "$openclawBinPath\node_modules")) {
+        Write-Host ""
+        Write-Host "Warning: node_modules not found in package." -ForegroundColor Yellow
+        Write-Host "The package should include bundled dependencies." -ForegroundColor Yellow
+        Write-Host ""
+        if (Test-Path "$openclawBinPath\package.json") {
+            Write-Host "Attempting to install dependencies..." -ForegroundColor Yellow
+            $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+            $npmCommand = Get-Command npm -ErrorAction SilentlyContinue
+            if ($nodeCommand -and $npmCommand) {
+                Push-Location $openclawBinPath
+                npm install --omit=dev 2>&1 | Out-Null
+                Pop-Location
+                Write-Host "Dependencies installed" -ForegroundColor Green
+            } else {
+                Write-Host "ERROR: npm is required but not found." -ForegroundColor Red
+                Write-Host "Please install Node.js/npm or use a properly bundled package." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }
+        }
+    } else {
+        Write-Host "Dependencies already bundled in package" -ForegroundColor Green
     }
 
     Write-Host ""
