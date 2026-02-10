@@ -233,11 +233,11 @@ jobs:
           $nodeModulesPath = Join-Path $testBinPath "node_modules"
 
           if (Test-Path $nodeModulesPath) {
-            Write-Host "✓ node_modules found (bundled successfully)" -ForegroundColor Green
+            Write-Host "[OK] node_modules found (bundled successfully)" -ForegroundColor Green
             $packageCount = (Get-ChildItem $nodeModulesPath -Directory | Measure-Object).Count
             Write-Host "  Package count: $packageCount" -ForegroundColor Cyan
           } else {
-            Write-Host "✗ ERROR: node_modules NOT found!" -ForegroundColor Red
+            Write-Host "[FAIL] ERROR: node_modules NOT found!" -ForegroundColor Red
             Write-Host "  Package should have bundled dependencies" -ForegroundColor Red
             exit 1
           }
@@ -249,9 +249,9 @@ jobs:
           $indexPath = Join-Path $testBinPath "dist\index.js"
 
           if (Test-Path $indexPath) {
-            Write-Host "✓ dist/index.js found" -ForegroundColor Green
+            Write-Host "[OK] dist/index.js found" -ForegroundColor Green
           } else {
-            Write-Host "✗ ERROR: dist/index.js NOT found!" -ForegroundColor Red
+            Write-Host "[FAIL] ERROR: dist/index.js NOT found!" -ForegroundColor Red
             Write-Host "  Checking for index.js in other locations..." -ForegroundColor Yellow
             Get-ChildItem $testBinPath -Filter "index.js" -Recurse | Select-Object FullName
             exit 1
@@ -274,7 +274,7 @@ jobs:
           node dist/index.js --help | Select-Object -First 20
 
           Pop-Location
-          Write-Host "`n✓ OpenClaw CLI works!" -ForegroundColor Green
+          Write-Host "`n[OK] OpenClaw CLI works!" -ForegroundColor Green
 
       - name: Test Install-OpenClaw.ps1 script syntax
         shell: powershell
@@ -285,9 +285,9 @@ jobs:
           [System.Management.Automation.PSParser]::Tokenize($script, [ref]$errors) | Out-Null
 
           if ($errors.Count -eq 0) {
-            Write-Host "✓ Install-OpenClaw.ps1 syntax is valid" -ForegroundColor Green
+            Write-Host "[OK] Install-OpenClaw.ps1 syntax is valid" -ForegroundColor Green
           } else {
-            Write-Host "✗ Syntax errors found in Install-OpenClaw.ps1:" -ForegroundColor Red
+            Write-Host "[FAIL] Syntax errors found in Install-OpenClaw.ps1:" -ForegroundColor Red
             $errors | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
             exit 1
           }
@@ -301,9 +301,9 @@ jobs:
           [System.Management.Automation.PSParser]::Tokenize($script, [ref]$errors) | Out-Null
 
           if ($errors.Count -eq 0) {
-            Write-Host "✓ Uninstall-OpenClaw.ps1 syntax is valid" -ForegroundColor Green
+            Write-Host "[OK] Uninstall-OpenClaw.ps1 syntax is valid" -ForegroundColor Green
           } else {
-            Write-Host "✗ Syntax errors found in Uninstall-OpenClaw.ps1:" -ForegroundColor Red
+            Write-Host "[FAIL] Syntax errors found in Uninstall-OpenClaw.ps1:" -ForegroundColor Red
             $errors | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
             exit 1
           }
