@@ -137,7 +137,8 @@ jobs:
         with:
           name: npm-package-windows
           path: ./artifacts/*.tgz
-          retention-days: 7
+          retention-days: 90
+          if-no-files-found: error
 
   test-installer-script:
     name: Test PowerShell Installer
@@ -235,6 +236,105 @@ jobs:
             dist/*.msi
             dist/*.exe
           retention-days: 7
+
+  release-latest:
+    name: Create Latest Release (Public)
+    runs-on: windows-latest
+    needs: [build-npm-package, test-installer-script]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download NPM package
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-package-windows
+          path: ./release-artifacts
+
+      - name: Display release artifacts
+        shell: bash
+        run: |
+          echo "Release artifacts:"
+          ls -lh ./release-artifacts/
+
+      - name: Get commit info
+        id: commit_info
+        shell: bash
+        run: |
+          COMMIT_SHORT=$(git rev-parse --short HEAD)
+          COMMIT_DATE=$(git show -s --format=%ci HEAD | cut -d' ' -f1)
+          echo "commit_short=$COMMIT_SHORT" >> "$GITHUB_OUTPUT"
+          echo "commit_date=$COMMIT_DATE" >> "$GITHUB_OUTPUT"
+
+      - name: Create release notes
+        shell: bash
+        run: |
+          cat > release-notes.md <<'EOF'
+          # Clawdbot Windows Package - Latest Build
+
+          **Build Date:** ${{ steps.commit_info.outputs.commit_date }}
+          **Commit:** ${{ steps.commit_info.outputs.commit_short }}
+          **Version:** ${{ needs.build-npm-package.outputs.package_version }}
+
+          ## 🚀 Installation
+
+          ### Direct Download
+          Download the `.tgz` file below and install with:
+          ```powershell
+          npm install -g clawdbot-${{ needs.build-npm-package.outputs.package_version }}.tgz
+          ```
+
+          ### From NPM Registry (if published)
+          ```powershell
+          npm install -g @clawdbot/clawdbot
+          ```
+
+          ### PowerShell Quick Install
+          ```powershell
+          # Download and extract
+          Invoke-WebRequest -Uri "https://github.com/j0904/clawdbot/releases/download/latest/moltbot-${{ needs.build-npm-package.outputs.package_version }}.tgz" -OutFile clawdbot.tgz
+          tar -xzf clawdbot.tgz
+          cd package
+          npm install -g .
+          ```
+
+          ## 📦 Package Contents
+          - NPM package tarball for Windows
+          - Compatible with Node.js 22+
+          - Built and tested on Windows
+
+          ## 📖 Documentation
+          - [GitHub Repository](https://github.com/j0904/clawdbot)
+          - [Installation Guide](https://github.com/j0904/clawdbot#installation)
+
+          ---
+          **Note:** This is an automated build from the latest commit to `main`. For stable releases, use tagged versions.
+          EOF
+          cat release-notes.md
+
+      - name: Delete existing 'latest' release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || echo "No existing 'latest' release to delete"
+
+      - name: Create or Update Latest Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Latest Windows Build
+          tag_name: latest
+          files: |
+            ./release-artifacts/*.tgz
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   release-windows:
     name: Create Windows Release Assets
