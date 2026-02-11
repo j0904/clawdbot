@@ -258,6 +258,7 @@ jobs:
       - name: Test OpenClaw CLI
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Continue'
           $testBinPath = "C:\TestOpenClaw\bin"
           Push-Location $testBinPath
 
@@ -266,9 +267,10 @@ jobs:
           # Test --version (capture exit code)
           Write-Host "`nTesting: node dist/index.js --version" -ForegroundColor Yellow
           $versionOutput = & node dist/index.js --version 2>&1
+          $versionExit = $LASTEXITCODE
           Write-Host $versionOutput
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "[FAIL] --version failed with exit code $LASTEXITCODE" -ForegroundColor Red
+          if ($versionExit -ne 0) {
+            Write-Host "[FAIL] --version failed with exit code $versionExit" -ForegroundColor Red
             Pop-Location
             exit 1
           }
@@ -279,15 +281,16 @@ jobs:
           Write-Host $helpOutput
 
           # Check if help output contains expected content
-          if ($helpOutput -match "OpenClaw|Usage|Commands") {
+          $helpString = $helpOutput -join " "
+          if ($helpString -match "OpenClaw|Usage|Commands") {
             Write-Host "`n[OK] OpenClaw CLI works!" -ForegroundColor Green
+            Pop-Location
+            exit 0
           } else {
             Write-Host "`n[FAIL] Help output doesn't look correct" -ForegroundColor Red
             Pop-Location
             exit 1
           }
-
-          Pop-Location
 
       - name: Test Install-OpenClaw.ps1 script syntax
         shell: powershell
